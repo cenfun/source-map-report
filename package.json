@@ -1,6 +1,6 @@
 {
   "name": "source-map-report",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "preview source map file in html",
   "main": "lib/index.js",
   "files": [

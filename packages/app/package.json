@@ -1,0 +1,11 @@
+{
+    "name": "source-map-report",
+    "version": "1.0.0",
+    "private": true,
+    "main": "dist/source-map-report.js",
+    "files": [
+        "dist"
+    ],
+    "dependencies": {},
+    "devDependencies": {}
+}

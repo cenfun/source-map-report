@@ -14,8 +14,8 @@ npm i source-map-report
 const SMR = require('source-map-report');
 SMR({
     name: "My source map report",
-    sourceMap: "raw source map string",
-    outputFile: "path-to/report.html"
+    sourceMaps: ["raw source map string 1", "raw source map string 2"],
+    outputFile: "path-to/my-report.html"
 });
 ```
 see [scripts/test.js](/scripts/test.js)

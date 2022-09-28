@@ -3,3 +3,4 @@
 /package-lock.json
 /packages/*/dist/
 /lib/runtime
+/test/map

@@ -12,12 +12,13 @@
           class="vui-title"
           tooltip="Lightweight UI components"
         >
-          Source Map Report
+          {{ state.name }}
         </div>
         <div class="vui-upload">
           <input
             type="file"
             accept=".map"
+            multiple
             @change="onUpload"
           >
         </div>
@@ -51,13 +52,14 @@
     <div class="vui-body vui-flex-auto">
       <div class="vui-grid" />
       <div
-        v-if="!state.reportData"
+        v-if="!state.sourceMaps"
         class="vui-no-report-data"
       >
-        <span>Please select a *.map file</span>
+        <span>Please select *.map file(s)</span>
         <input
           type="file"
           accept=".map"
+          multiple
           @change="onUpload"
         >
       </div>
@@ -80,11 +82,23 @@ const {
 } = VineUI;
 
 const state = shallowReactive({
-    reportData: decompress(window.reportData),
+    name: 'Source Map Report',
+    sourceMaps: null,
     grid: null,
     group: false,
     keywords: ''
 });
+
+const initReportData = () => {
+    const reportData = window.reportData;
+    if (reportData) {
+        const data = JSON.parse(decompress(reportData));
+        if (data.name) {
+            state.name = data.name;
+        }
+        state.sourceMaps = data.sourceMaps;
+    }
+};
 
 const isMatch = (value, list, rowData, matchedKey) => {
     for (let i = 0, l = list.length; i < l; i++) {
@@ -243,26 +257,46 @@ const createGrid = () => {
 
 };
 
-const getGridRows = (consumer) => {
+const getGridRows = (consumers) => {
+    const rows = [];
 
-    let totalSize = 0;
+    let mapSize = 0;
+    consumers.forEach((consumer) => {
 
-    const contents = consumer.sourcesContent || [];
+        let totalSize = 0;
+        const contents = consumer.sourcesContent || [];
 
-    const rows = consumer.sources.map((it, i) => {
-        const content = contents[i];
-        const size = content ? content.length : 0;
-        totalSize += size;
-        return {
-            name: it,
-            size,
-            percent: 0
+        const subs = consumer.sources.map((it, i) => {
+            const content = contents[i];
+            const size = content ? content.length : 0;
+            totalSize += size;
+            return {
+                name: it,
+                size,
+                percent: 0
+            };
+        });
+
+        mapSize += totalSize;
+        if (totalSize && subs.length > 1) {
+            subs.forEach((row) => {
+                row.percent = (row.size / totalSize * 100).toFixed(2);
+            });
+        }
+
+        const row = {
+            name: consumer.file,
+            size: totalSize,
+            subs
         };
+
+        rows.push(row);
+
     });
 
-    if (totalSize) {
+    if (mapSize && rows.length > 1) {
         rows.forEach((row) => {
-            row.percent = (row.size / totalSize * 100).toFixed(2);
+            row.percent = (row.size / mapSize * 100).toFixed(2);
         });
     }
 
@@ -270,8 +304,7 @@ const getGridRows = (consumer) => {
 
 };
 
-const getGridColumns = (consumer) => {
-//update every time for invisible
+const getGridColumns = () => {
     const columns = [{
         id: 'name',
         name: 'Name',
@@ -302,10 +335,19 @@ const getGridColumns = (consumer) => {
 
 const renderGrid = async () => {
 
-    const reportData = state.reportData;
-    if (!reportData) {
+    const sourceMaps = state.sourceMaps;
+    if (!Array.isArray(sourceMaps)) {
         return;
     }
+
+    const consumers = [];
+    for (const item of sourceMaps) {
+        const consumer = await Consumer(item);
+        consumers.push(consumer);
+        consumer.destroy();
+    }
+
+    console.log(consumers);
 
     let grid = state.grid;
 
@@ -314,15 +356,10 @@ const renderGrid = async () => {
         state.grid = grid;
     }
 
-    const consumer = await Consumer(reportData);
-    console.log(consumer);
-
     const gridData = {
-        columns: getGridColumns(consumer),
-        rows: getGridRows(consumer)
+        columns: getGridColumns(),
+        rows: getGridRows(consumers)
     };
-
-    consumer.destroy();
 
     console.log('gridData', gridData);
 
@@ -333,24 +370,30 @@ const renderGrid = async () => {
 
 
 const onUpload = async (e) => {
-    const file = e.target.files[0];
-    if (!file) {
+    const files = e.target.files;
+    if (!files.length) {
         return;
     }
 
-    //console.log(file);
+    const list = [];
 
-    let err;
-    const str = await file.text().catch((er) => {
-        err = er;
-    });
+    for (const file of files) {
+        let err;
+        const str = await file.text().catch((er) => {
+            err = er;
+        });
+        if (err) {
+            console.error(err);
+            continue;
+        }
+        list.push(str);
+    }
 
-    if (err) {
-        console.error(err);
+    if (!list.length) {
         return;
     }
 
-    state.reportData = str;
+    state.sourceMaps = list;
 
 };
 
@@ -361,7 +404,7 @@ const updateGrid = () => {
     }
 };
 
-watch(() => state.reportData, () => {
+watch(() => state.sourceMaps, () => {
     renderGrid();
 });
 
@@ -371,6 +414,7 @@ watch(() => state.keywords, () => {
 
 
 onMounted(() => {
+    initReportData();
     renderGrid();
 });
 

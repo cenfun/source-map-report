@@ -9,7 +9,7 @@
       </div>
     </div>
     <div>
-      <pre><code>{{ props.rowData.content }}</code></pre>
+      <pre><code>{{ props.rowData.codes }}</code></pre>
     </div>
   </div>
 </template>

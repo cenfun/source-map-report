@@ -17,7 +17,6 @@
         <div class="vui-upload">
           <input
             type="file"
-            accept=".map"
             multiple
             @change="onUpload"
           >
@@ -52,13 +51,12 @@
     <div class="vui-body vui-flex-auto">
       <div class="vui-grid" />
       <div
-        v-if="!state.sourceMaps"
+        v-if="!state.sourcesAndMaps"
         class="vui-no-report-data"
       >
-        <span>Please select *.map file(s)</span>
+        <span>Please select source(s) and map(s)</span>
         <input
           type="file"
-          accept=".map"
           multiple
           @change="onUpload"
         >
@@ -66,7 +64,7 @@
     </div>
     <VuiFlyover
       :visible="state.flyoverVisible"
-      width="60%"
+      width="80%"
       position="right"
     >
       <div class="vui-flyover-main vui-flex-column">
@@ -114,7 +112,7 @@ const {
 
 const state = shallowReactive({
     name: 'Source Map Report',
-    sourceMaps: null,
+    sourcesAndMaps: null,
     grid: null,
     group: false,
     keywords: '',
@@ -129,7 +127,7 @@ const initReportData = () => {
         if (data.name) {
             state.name = data.name;
         }
-        state.sourceMaps = data.sourceMaps;
+        state.sourcesAndMaps = data.sourcesAndMaps;
     }
 };
 
@@ -240,6 +238,10 @@ const createGrid = () => {
 
     grid.setFormatter({
 
+        null: function(v) {
+            return v;
+        },
+
         string: function(v, rd, cd) {
             const id = cd.id;
             const color = rd[`${id}_color`];
@@ -264,17 +266,33 @@ const createGrid = () => {
                 v = `<span style="color:${rd.name_color};">${v}</span>`;
             }
 
-            if (rd.type === 'source') {
+            if (rd.codes) {
                 v += `
                 <div class="tg-cell-hover-icon tg-flyover-icon" title="Click to show module detail">
-                    <div class="tg-info-icon" />
+                    <div class="vui-icon vui-icon-info" />
                 </div>
             `;
             }
             return df(v, rd, cd, node);
         },
 
+        rowNumber: function(v, rd) {
+            const n = rd.tg_list_index + 1;
+            if (rd.tg_group) {
+                return `${n}.`;
+            }
+            return n;
+        },
+
+        codes: function(v, rd) {
+            const icon = rd.codes ? 'passed' : 'failed';
+            return `<div class="vui-icon vui-icon-${icon}"></div>`;
+        },
+
         size: function(v, rd, cd) {
+            if (!Number.isInteger(v)) {
+                return v;
+            }
             v = BF(v);
             return this.getFormatter('string')(v, rd, cd);
         },
@@ -299,48 +317,68 @@ const createGrid = () => {
 
 };
 
-const getGridRows = (consumers) => {
-    const rows = [];
+const getGridRows = (consumers, sourceFiles) => {
 
-    let mapSize = 0;
-    consumers.forEach((consumer) => {
+    let rowsSize = 0;
 
-        let totalSize = 0;
-        const contents = consumer.sourcesContent || [];
+    const rows = consumers.map((consumer) => {
 
+        //console.log(consumer);
+        const row = {
+            name: consumer.file
+        };
+
+        const rowCodes = sourceFiles[row.name];
+        if (rowCodes) {
+            row.size = rowCodes.length;
+            rowsSize += row.size;
+            row.codes = rowCodes;
+        }
+
+        let subsSize = 0;
         const subs = consumer.sources.map((it, i) => {
-            const content = contents[i];
-            const size = content ? content.length : 0;
-            totalSize += size;
+            let subCodes = consumer.sourceContentFor(it);
+            if (!subCodes) {
+                subCodes = sourceFiles[it];
+            }
+
+            if (!subCodes) {
+                return {
+                    name: it
+                };
+            }
+
+            const size = subCodes.length;
+            subsSize += size;
             return {
                 name: it,
                 size,
-                percent: 0,
-                type: 'source',
-                content
+                codes: subCodes,
+                type: 'source'
             };
+
         });
 
-        mapSize += totalSize;
-        if (totalSize && subs.length > 1) {
-            subs.forEach((row) => {
-                row.percent = (row.size / totalSize * 100).toFixed(2);
+        if (subsSize && subs.length > 1) {
+            subs.forEach((sub) => {
+                if (sub.codes) {
+                    sub.percent = (sub.size / subsSize * 100).toFixed(2);
+                }
             });
         }
 
-        const row = {
-            name: consumer.file,
-            size: totalSize,
-            subs
-        };
+        //append row subs
+        row.subs = subs;
 
-        rows.push(row);
+        return row;
 
     });
 
-    if (mapSize && rows.length > 1) {
+    if (rowsSize && rows.length > 1) {
         rows.forEach((row) => {
-            row.percent = (row.size / mapSize * 100).toFixed(2);
+            if (row.codes) {
+                row.percent = (row.size / rowsSize * 100).toFixed(2);
+            }
         });
     }
 
@@ -352,8 +390,14 @@ const getGridColumns = () => {
     const columns = [{
         id: 'name',
         name: 'Name',
-        width: 600,
+        width: 500,
         maxWidth: 2048
+    }, {
+        id: 'codes',
+        name: 'Codes',
+        align: 'center',
+        formatter: 'codes',
+        width: 55
     }, {
         id: 'percent',
         name: 'Percent',
@@ -370,8 +414,13 @@ const getGridColumns = () => {
         id: 'size',
         name: 'Size',
         align: 'right',
+        formatter: 'size'
+    }, {
+        id: 'sizeChanged',
+        name: 'Changed',
+        align: 'right',
         formatter: 'size',
-        width: 80
+        width: 100
     }];
 
     return columns;
@@ -379,14 +428,33 @@ const getGridColumns = () => {
 
 const renderGrid = async () => {
 
-    const sourceMaps = state.sourceMaps;
-    if (!Array.isArray(sourceMaps)) {
+    const sourcesAndMaps = state.sourcesAndMaps;
+    if (!sourcesAndMaps) {
         return;
     }
 
+    const sourceFiles = {};
+    const list = [];
+
+    Object.keys(sourcesAndMaps).forEach((filename) => {
+        const fileContent = sourcesAndMaps[filename];
+        if (filename.slice(-4) === '.map') {
+            list.push({
+                filename: filename,
+                content: fileContent
+            });
+            return;
+        }
+        sourceFiles[filename] = fileContent;
+    });
+
     const consumers = [];
-    for (const item of sourceMaps) {
-        const consumer = await Consumer(item);
+    for (const item of list) {
+        const consumer = await Consumer(item.content);
+        if (!consumer.file) {
+            //using map filename to match source filename
+            consumer.file = item.filename.slice(0, -4);
+        }
         consumers.push(consumer);
         consumer.destroy();
     }
@@ -402,7 +470,7 @@ const renderGrid = async () => {
 
     const gridData = {
         columns: getGridColumns(),
-        rows: getGridRows(consumers)
+        rows: getGridRows(consumers, sourceFiles)
     };
 
     console.log('gridData', gridData);
@@ -419,9 +487,10 @@ const onUpload = async (e) => {
         return;
     }
 
-    const list = [];
+    const maps = {};
 
     for (const file of files) {
+
         let err;
         const str = await file.text().catch((er) => {
             err = er;
@@ -430,14 +499,12 @@ const onUpload = async (e) => {
             console.error(err);
             continue;
         }
-        list.push(str);
+
+        maps[file.name] = str;
+
     }
 
-    if (!list.length) {
-        return;
-    }
-
-    state.sourceMaps = list;
+    state.sourcesAndMaps = maps;
 
 };
 
@@ -448,7 +515,7 @@ const updateGrid = () => {
     }
 };
 
-watch(() => state.sourceMaps, () => {
+watch(() => state.sourcesAndMaps, () => {
     renderGrid();
 });
 
@@ -513,6 +580,18 @@ body {
     opacity: 1;
 }
 
+.vui-icon-info {
+    background-image: url("./images/info.svg");
+}
+
+.vui-icon-passed {
+    background-image: url("./images/passed.svg");
+}
+
+.vui-icon-failed {
+    background-image: url("./images/failed.svg");
+}
+
 .vui-icon-github {
     background-image: url("./images/github.svg");
 }
@@ -575,6 +654,19 @@ grid
             border-right: none;
         }
 
+        .vui-icon {
+            opacity: 1;
+            pointer-events: none;
+            width: 16px;
+            height: 100%;
+            background-size: 16px 16px;
+            background-color: #fff;
+        }
+
+        .tg-align-center .vui-icon {
+            margin: 0 auto;
+        }
+
         .color-match {
             color: midnightblue;
         }
@@ -592,16 +684,6 @@ grid
 /*
 flyover
 */
-
-.tg-info-icon {
-    width: 100%;
-    height: 100%;
-    background-color: #fff;
-    pointer-events: none;
-    background-repeat: no-repeat;
-    background-position: center center;
-    background-image: url("./images/info-circle-outlined.svg");
-}
 
 .tg-flyover-icon {
     position: absolute;

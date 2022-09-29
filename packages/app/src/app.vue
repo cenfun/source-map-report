@@ -77,7 +77,7 @@
               <div class="vui-icon vui-icon-arrow-right" />
             </div>
             <div class="vui-flyover-title vui-flex-auto">
-              Source
+              {{ state.currentFile }}
             </div>
             <div
               class="vui-flyover-icon"
@@ -88,7 +88,17 @@
           </VuiFlex>
         </div>
         <div class="vui-flyover-content vui-flex-auto">
-          <Source :row-data="state.flyoverData" />
+          <VuiFlex
+            height="100%"
+          >
+            <div
+              ref="currentCodes"
+              class="vui-codes vui-current-codes"
+            />
+            <div class="vui-codes">
+              <code>{{ state.currentCodes }}</code>
+            </div>
+          </VuiFlex>
         </div>
       </div>
     </VuiFlyover>
@@ -97,14 +107,15 @@
 <script setup>
 import VineUI from 'vine-ui';
 import { Grid } from 'turbogrid';
-import decompress from 'lz-utils/lib/decompress.js';
-import { BF } from './util/util.js';
+//import Prism from 'prismjs';
+import 'prismjs/themes/prism.min.css';
 import {
-    onMounted, shallowReactive, watch
+    onMounted, shallowReactive, watch, ref
 } from 'vue';
 
+import decompress from 'lz-utils/lib/decompress.js';
+import { BF } from './util/util.js';
 import Consumer from './util/consumer.js';
-import Source from './source.vue';
 
 const {
     VuiFlex, VuiInput, VuiSwitch, VuiFlyover
@@ -113,23 +124,25 @@ const {
 const state = shallowReactive({
     name: 'Source Map Report',
     sourcesAndMaps: null,
+    consumers: null,
+    sourceFiles: null,
     grid: null,
     group: false,
     keywords: '',
     flyoverVisible: false,
-    flyoverData: null
+    currentFile: '',
+    currentCodes: ''
 });
 
-const initReportData = () => {
-    const reportData = window.reportData;
-    if (reportData) {
-        const data = JSON.parse(decompress(reportData));
-        if (data.name) {
-            state.name = data.name;
-        }
-        state.sourcesAndMaps = data.sourcesAndMaps;
-    }
-};
+const currentCodes = ref(null);
+
+// const highlight = (codes) => {
+//     if (!codes) {
+//         return '';
+//     }
+//     const lang = Prism.languages.javascript;
+//     return Prism.highlight(codes, lang);
+// };
 
 const isMatch = (value, list, rowData, matchedKey) => {
     for (let i = 0, l = list.length; i < l; i++) {
@@ -174,14 +187,33 @@ const filterHandler = (rowItem) => {
 
 const showFlyover = (rowData, force) => {
 
+    if (!rowData.codes) {
+        return;
+    }
+
     if (!state.flyoverVisible && !force) {
         return;
     }
 
     state.flyoverVisible = true;
 
-    rowData.sizeH = BF(rowData.size);
-    state.flyoverData = rowData;
+    state.currentFile = rowData.name;
+    state.currentCodes = rowData.codes;
+
+    if (rowData.type === 'original') {
+        const consumer = state.consumers[rowData.tg_parent.index];
+        console.log(consumer);
+
+
+        return;
+    }
+
+    //generated
+
+    const consumer = state.consumers[rowData.index];
+    console.log(consumer);
+
+    //currentCodes.value.innerHTML = highlight();
 
 };
 
@@ -214,18 +246,18 @@ const createGrid = () => {
         showFlyover(rowItem, true);
     });
 
-    grid.bind('onUpdated', () => {
-        //updateFilterInfo(gridName);
-    });
+    //grid.bind('onUpdated', () => {
+    //updateFilterInfo(gridName);
+    //});
 
     grid.setOption({
         //textSelectable: true,
         //frozenRow: 0,
-        rowHeight: 27,
         sortField: 'size',
         sortAsc: false,
         sortOnInit: true,
         selectMultiple: false,
+        rowHeight: 27,
         rowNumberVisible: true,
         rowNumberWidth: 50,
         rowNotFound: '<div>No Results</div>',
@@ -307,9 +339,7 @@ const createGrid = () => {
             if (!v) {
                 return '';
             }
-            return `
-            <div class="vui-percent" style="background:linear-gradient(to right, #999 ${v}%, #fff ${v}%);"></div>
-            `;
+            return `<div class="vui-percent" style="background:linear-gradient(to right, #999 ${v}%, #fff ${v}%);"></div>`;
         }
     });
 
@@ -317,15 +347,20 @@ const createGrid = () => {
 
 };
 
-const getGridRows = (consumers, sourceFiles) => {
+const getGridRows = () => {
+
+    const consumers = state.consumers;
+    const sourceFiles = state.sourceFiles;
 
     let rowsSize = 0;
 
-    const rows = consumers.map((consumer) => {
+    const rows = consumers.map((consumer, gi) => {
 
         //console.log(consumer);
         const row = {
-            name: consumer.file
+            index: gi,
+            name: consumer.file,
+            type: 'generated'
         };
 
         const rowCodes = sourceFiles[row.name];
@@ -336,7 +371,7 @@ const getGridRows = (consumers, sourceFiles) => {
         }
 
         let subsSize = 0;
-        const subs = consumer.sources.map((it, i) => {
+        const subs = consumer.sources.map((it, oi) => {
             let subCodes = consumer.sourceContentFor(it);
             if (!subCodes) {
                 subCodes = sourceFiles[it];
@@ -344,17 +379,20 @@ const getGridRows = (consumers, sourceFiles) => {
 
             if (!subCodes) {
                 return {
-                    name: it
+                    index: oi,
+                    name: it,
+                    type: 'original'
                 };
             }
 
             const size = subCodes.length;
             subsSize += size;
             return {
+                index: oi,
                 name: it,
                 size,
                 codes: subCodes,
-                type: 'source'
+                type: 'original'
             };
 
         });
@@ -426,40 +464,7 @@ const getGridColumns = () => {
     return columns;
 };
 
-const renderGrid = async () => {
-
-    const sourcesAndMaps = state.sourcesAndMaps;
-    if (!sourcesAndMaps) {
-        return;
-    }
-
-    const sourceFiles = {};
-    const list = [];
-
-    Object.keys(sourcesAndMaps).forEach((filename) => {
-        const fileContent = sourcesAndMaps[filename];
-        if (filename.slice(-4) === '.map') {
-            list.push({
-                filename: filename,
-                content: fileContent
-            });
-            return;
-        }
-        sourceFiles[filename] = fileContent;
-    });
-
-    const consumers = [];
-    for (const item of list) {
-        const consumer = await Consumer(item.content);
-        if (!consumer.file) {
-            //using map filename to match source filename
-            consumer.file = item.filename.slice(0, -4);
-        }
-        consumers.push(consumer);
-        consumer.destroy();
-    }
-
-    console.log(consumers);
+const renderGrid = () => {
 
     let grid = state.grid;
 
@@ -470,7 +475,7 @@ const renderGrid = async () => {
 
     const gridData = {
         columns: getGridColumns(),
-        rows: getGridRows(consumers, sourceFiles)
+        rows: getGridRows()
     };
 
     console.log('gridData', gridData);
@@ -515,8 +520,60 @@ const updateGrid = () => {
     }
 };
 
-watch(() => state.sourcesAndMaps, () => {
+const initSourcesAndMaps = async () => {
+
+    const sourcesAndMaps = state.sourcesAndMaps;
+    if (!sourcesAndMaps) {
+        return;
+    }
+
+    const sourceFiles = {};
+    const list = [];
+
+    Object.keys(sourcesAndMaps).forEach((filename) => {
+        const fileContent = sourcesAndMaps[filename];
+        if (filename.slice(-4) === '.map') {
+            list.push({
+                filename: filename,
+                content: fileContent
+            });
+            return;
+        }
+        sourceFiles[filename] = fileContent;
+    });
+
+    const consumers = [];
+    for (const item of list) {
+        const consumer = await Consumer(item.content);
+        if (!consumer.file) {
+            //using map filename to match source filename
+            consumer.file = item.filename.slice(0, -4);
+        }
+        consumers.push(consumer);
+        consumer.destroy();
+    }
+
+    console.log(consumers);
+
+    state.consumers = consumers;
+    state.sourceFiles = sourceFiles;
+
     renderGrid();
+};
+
+const initReportData = () => {
+    const reportData = window.reportData;
+    if (reportData) {
+        const data = JSON.parse(decompress(reportData));
+        if (data.name) {
+            state.name = data.name;
+        }
+        state.sourcesAndMaps = data.sourcesAndMaps;
+    }
+};
+
+watch(() => state.sourcesAndMaps, () => {
+    initSourcesAndMaps();
 });
 
 watch(() => state.keywords, () => {
@@ -526,7 +583,7 @@ watch(() => state.keywords, () => {
 
 onMounted(() => {
     initReportData();
-    renderGrid();
+    initSourcesAndMaps();
 });
 
 </script>
@@ -719,7 +776,15 @@ flyover
 }
 
 .vui-flyover-content {
-    padding: 10px;
+    padding: 5px;
+    overflow: auto;
+}
+
+.vui-codes {
+    font-family: monospace;
+    white-space: pre;
+    width: 50%;
+    height: 100%;
     overflow: auto;
 }
 

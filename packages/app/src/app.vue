@@ -64,6 +64,36 @@
         >
       </div>
     </div>
+    <VuiFlyover
+      :visible="state.flyoverVisible"
+      width="60%"
+      position="right"
+    >
+      <div class="vui-flyover-main vui-flex-column">
+        <div class="vui-flyover-header">
+          <VuiFlex spacing="10px">
+            <div
+              class="vui-flyover-icon"
+              @click="state.flyoverVisible=false"
+            >
+              <div class="vui-icon vui-icon-arrow-right" />
+            </div>
+            <div class="vui-flyover-title vui-flex-auto">
+              Source
+            </div>
+            <div
+              class="vui-flyover-icon"
+              @click="state.flyoverVisible=false"
+            >
+              <div class="vui-icon vui-icon-close" />
+            </div>
+          </VuiFlex>
+        </div>
+        <div class="vui-flyover-content vui-flex-auto">
+          <Source :row-data="state.flyoverData" />
+        </div>
+      </div>
+    </VuiFlyover>
   </VuiFlex>
 </template>
 <script setup>
@@ -76,9 +106,10 @@ import {
 } from 'vue';
 
 import Consumer from './util/consumer.js';
+import Source from './source.vue';
 
 const {
-    VuiFlex, VuiInput, VuiSwitch
+    VuiFlex, VuiInput, VuiSwitch, VuiFlyover
 } = VineUI;
 
 const state = shallowReactive({
@@ -86,7 +117,9 @@ const state = shallowReactive({
     sourceMaps: null,
     grid: null,
     group: false,
-    keywords: ''
+    keywords: '',
+    flyoverVisible: false,
+    flyoverData: null
 });
 
 const initReportData = () => {
@@ -141,6 +174,19 @@ const filterHandler = (rowItem) => {
 
 };
 
+const showFlyover = (rowData, force) => {
+
+    if (!state.flyoverVisible && !force) {
+        return;
+    }
+
+    state.flyoverVisible = true;
+
+    rowData.sizeH = BF(rowData.size);
+    state.flyoverData = rowData;
+
+};
+
 const createGrid = () => {
 
     const grid = new Grid('.vui-grid');
@@ -151,24 +197,24 @@ const createGrid = () => {
         }
         const rowItem = d.rowItem;
 
-        // let openFlyover = false;
-        // const icon = d.e.target;
-        // if (icon.classList.contains('tg-flyover-icon')) {
-        //     openFlyover = true;
-        // }
-        //showFlyover(rowItem, openFlyover);
+        let openFlyover = false;
+        const icon = d.e.target;
+        if (icon.classList.contains('tg-flyover-icon')) {
+            openFlyover = true;
+        }
+        showFlyover(rowItem, openFlyover);
 
         grid.setRowSelected(rowItem, d.e);
 
     });
 
-    // grid.bind('onDblClick', (e, d) => {
-    //     if (!d.rowNode) {
-    //         return;
-    //     }
-    //     const rowItem = d.rowItem;
-    //     //showFlyover(rowItem, true);
-    // });
+    grid.bind('onDblClick', (e, d) => {
+        if (!d.rowNode) {
+            return;
+        }
+        const rowItem = d.rowItem;
+        showFlyover(rowItem, true);
+    });
 
     grid.bind('onUpdated', () => {
         //updateFilterInfo(gridName);
@@ -214,18 +260,14 @@ const createGrid = () => {
                 v = `${left}<b class="color-match">${mid}</b>${right}`;
             }
 
-            if (rd.loaders) {
-                v = `❁${v}`;
-            }
-
             if (rd.name_color) {
                 v = `<span style="color:${rd.name_color};">${v}</span>`;
             }
 
-            if (rd.paths || rd.bailout) {
+            if (rd.type === 'source') {
                 v += `
                 <div class="tg-cell-hover-icon tg-flyover-icon" title="Click to show module detail">
-                    <div class="tg-issuer-icon" />
+                    <div class="tg-info-icon" />
                 </div>
             `;
             }
@@ -273,7 +315,9 @@ const getGridRows = (consumers) => {
             return {
                 name: it,
                 size,
-                percent: 0
+                percent: 0,
+                type: 'source',
+                content
             };
         });
 
@@ -470,7 +514,15 @@ body {
 }
 
 .vui-icon-github {
-    background-image: url("images/github.svg");
+    background-image: url("./images/github.svg");
+}
+
+.vui-icon-close {
+    background-image: url("./images/chrome-close.svg");
+}
+
+.vui-icon-arrow-right {
+    background-image: url("./images/arrow-right.svg");
 }
 
 .vui-body {
@@ -535,6 +587,58 @@ grid
             margin-top: 6px;
         }
     }
+}
+
+/*
+flyover
+*/
+
+.tg-info-icon {
+    width: 100%;
+    height: 100%;
+    background-color: #fff;
+    pointer-events: none;
+    background-repeat: no-repeat;
+    background-position: center center;
+    background-image: url("./images/info-circle-outlined.svg");
+}
+
+.tg-flyover-icon {
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: 20px;
+    height: 100%;
+    display: inline-block;
+    cursor: pointer;
+}
+
+.vui-flyover-main {
+    height: 100%;
+    overflow: hidden;
+}
+
+.vui-flyover-header {
+    background-color: #666;
+    padding: 0 10px;
+}
+
+.vui-flyover-icon {
+    cursor: pointer;
+    padding: 9px 0;
+}
+
+.vui-flyover-title {
+    height: 41px;
+    line-height: 41px;
+    color: #fff;
+    font-size: 16px;
+    font-weight: bold;
+}
+
+.vui-flyover-content {
+    padding: 10px;
+    overflow: auto;
 }
 
 </style>

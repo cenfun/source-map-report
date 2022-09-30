@@ -88,17 +88,11 @@
           </VuiFlex>
         </div>
         <div class="vui-flyover-content vui-flex-auto">
-          <VuiFlex
-            height="100%"
-          >
-            <div
-              ref="currentCodes"
-              class="vui-codes vui-current-codes"
-            />
-            <div class="vui-codes">
-              <code>{{ state.currentCodes }}</code>
+          <div class="vui-codes">
+            <div class="vui-current-codes line-numbers">
+              <pre class="language-"><code ref="currentCodes" /></pre>
             </div>
-          </VuiFlex>
+          </div>
         </div>
       </div>
     </VuiFlyover>
@@ -107,8 +101,6 @@
 <script setup>
 import VineUI from 'vine-ui';
 import { Grid } from 'turbogrid';
-//import Prism from 'prismjs';
-import 'prismjs/themes/prism.min.css';
 import {
     onMounted, shallowReactive, watch, ref
 } from 'vue';
@@ -116,6 +108,27 @@ import {
 import decompress from 'lz-utils/lib/decompress.js';
 import { BF } from './util/util.js';
 import Consumer from './util/consumer.js';
+
+import Prism from 'prismjs';
+
+import 'prismjs/themes/prism-coy.css';
+
+import 'prismjs/components/prism-scss.js';
+//import 'prismjs/components/prism-css-extras.js';
+
+import 'prismjs/plugins/line-numbers/prism-line-numbers.js';
+import 'prismjs/plugins/line-numbers/prism-line-numbers.css';
+
+//import 'prismjs/plugins/inline-color/prism-inline-color.js';
+//import 'prismjs/plugins/inline-color/prism-inline-color.css';
+
+const langMap = {
+    'vue': 'html',
+    'sass': 'css',
+    'less': 'css',
+    'mjs': 'js',
+    'ts': 'js'
+};
 
 const {
     VuiFlex, VuiInput, VuiSwitch, VuiFlyover
@@ -130,19 +143,98 @@ const state = shallowReactive({
     group: false,
     keywords: '',
     flyoverVisible: false,
-    currentFile: '',
-    currentCodes: ''
+    currentFile: ''
 });
 
 const currentCodes = ref(null);
 
-// const highlight = (codes) => {
-//     if (!codes) {
-//         return '';
-//     }
-//     const lang = Prism.languages.javascript;
-//     return Prism.highlight(codes, lang);
+// const htmlEscape = (str = '') => {
+//     return str.replace(/&/g, '&amp;').replace(/>/g, '&gt;').replace(/</g, '&lt;');
 // };
+
+const getLang = (name = '') => {
+    let lang = '';
+    const di = name.lastIndexOf('.');
+    if (di !== -1) {
+        const extname = name.slice(di + 1);
+        lang = langMap[extname] || extname;
+    }
+    return lang || 'js';
+};
+
+const highlightCodes = ($elem, filename, codes) => {
+
+    const lang = getLang(filename);
+    const grammar = Prism.languages[lang] || Prism.languages.javascript;
+
+    $elem.parentNode.className = `language-${lang}`;
+    //console.log(lang, grammar);
+
+
+    const html = Prism.highlight(codes, grammar, lang);
+
+    //new line mark
+    let i = 0;
+    const NEW_LINE_EXP = /(\r\n|\r|\n)/g;
+    const str = html.replace(NEW_LINE_EXP, function() {
+        i += 1;
+        return `<br line="${i}">`;
+    });
+    $elem.innerHTML = str;
+
+    console.log(codes);
+
+
+    //$elem.innerHTML = html;
+
+
+    Prism.hooks.run('complete', {
+        code: codes,
+        grammar: grammar,
+        language: lang,
+        element: $elem
+    });
+};
+
+const showFlyover = (rowData, force) => {
+
+    if (!rowData.codes) {
+        return;
+    }
+
+    if (!state.flyoverVisible && !force) {
+        return;
+    }
+
+    if (state.currentTgIndex === rowData.tg_index) {
+        return;
+    }
+    state.currentTgIndex = rowData.tg_index;
+
+    state.flyoverVisible = true;
+    state.currentType = rowData.type;
+    state.currentFile = rowData.name;
+
+    const codes = rowData.codes;
+
+    //https://github.com/mozilla/source-map
+
+    if (rowData.type === 'original') {
+        const generatedRow = rowData.tg_parent;
+        state.generatedIndex = generatedRow.index;
+    } else {
+        //generated
+    }
+
+    const $current = currentCodes.value;
+
+    $current.textContent = codes;
+
+    setTimeout(() => {
+        highlightCodes($current, rowData.name, codes);
+    }, 100);
+
+};
 
 const isMatch = (value, list, rowData, matchedKey) => {
     for (let i = 0, l = list.length; i < l; i++) {
@@ -182,38 +274,6 @@ const filterHandler = (rowItem) => {
     }
 
     return false;
-
-};
-
-const showFlyover = (rowData, force) => {
-
-    if (!rowData.codes) {
-        return;
-    }
-
-    if (!state.flyoverVisible && !force) {
-        return;
-    }
-
-    state.flyoverVisible = true;
-
-    state.currentFile = rowData.name;
-    state.currentCodes = rowData.codes;
-
-    if (rowData.type === 'original') {
-        const consumer = state.consumers[rowData.tg_parent.index];
-        console.log(consumer);
-
-
-        return;
-    }
-
-    //generated
-
-    const consumer = state.consumers[rowData.index];
-    console.log(consumer);
-
-    //currentCodes.value.innerHTML = highlight();
 
 };
 
@@ -360,7 +420,8 @@ const getGridRows = () => {
         const row = {
             index: gi,
             name: consumer.file,
-            type: 'generated'
+            type: 'generated',
+            selectable: true
         };
 
         const rowCodes = sourceFiles[row.name];
@@ -776,16 +837,32 @@ flyover
 }
 
 .vui-flyover-content {
-    padding: 5px;
-    overflow: auto;
+    overflow: hidden;
 }
 
 .vui-codes {
     font-family: monospace;
-    white-space: pre;
-    width: 50%;
+    width: 100%;
     height: 100%;
     overflow: auto;
+    position: relative;
+
+    pre,
+    code {
+        margin: 0;
+        padding: 0;
+    }
+}
+
+.vui-current-codes {
+    position: absolute;
+    min-width: 100%;
+    min-height: 100%;
+
+    pre::before,
+    pre::after {
+        display: none;
+    }
 }
 
 </style>

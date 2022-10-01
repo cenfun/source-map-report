@@ -23,4 +23,4 @@ SMR({
     }
 });
 ```
-see [scripts/test.js](/scripts/test.js)
+see [test/test.js](/test/test.js)

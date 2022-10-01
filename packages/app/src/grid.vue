@@ -301,12 +301,6 @@ const getGridColumns = () => {
         name: 'Size',
         align: 'right',
         formatter: 'size'
-    }, {
-        id: 'sizeChanged',
-        name: 'Changed',
-        align: 'right',
-        formatter: 'size',
-        width: 100
     }];
 
     return columns;

@@ -64,7 +64,7 @@
     </div>
     <VuiFlyover
       :visible="state.flyoverVisible"
-      width="80%"
+      width="68%"
       position="right"
       @end="onFlyoverEnd"
     >
@@ -164,19 +164,11 @@ const getLang = (name = '') => {
     return lang || 'js';
 };
 
-const highlightCodes = (filename, codes) => {
+let highlightCache = {};
+let highlightIndex = null;
 
-    const lang = getLang(filename);
-    const grammar = Prism.languages[lang] || Prism.languages.javascript;
-
-    const $elem = state.$currentCodes;
-
-    $elem.parentNode.className = `language-${lang}`;
-    //console.log(lang, grammar);
-
-
+const getHighlightHTML = (lang, grammar, codes) => {
     const html = Prism.highlight(codes, grammar, lang);
-
     //new line mark
     let i = 0;
     const NEW_LINE_EXP = /(\r\n|\r|\n)/g;
@@ -184,18 +176,34 @@ const highlightCodes = (filename, codes) => {
         i += 1;
         return `<br line="${i}">`;
     });
-    $elem.innerHTML = str;
 
-    //console.log(codes);
+    return str;
+};
 
-    //$elem.innerHTML = html;
+const highlightCodes = (filename, codes) => {
+    const lang = getLang(filename);
+    const grammar = Prism.languages[lang] || Prism.languages.javascript;
+    //console.log(lang, grammar);
 
+    let html = highlightCache[highlightIndex];
+    if (!html) {
+        html = getHighlightHTML(lang, grammar, codes);
+        highlightCache[highlightIndex] = html;
+    }
+
+    const $elem = state.$currentCodes;
+
+    $elem.innerHTML = html;
+    $elem.parentNode.className = `language-${lang}`;
+
+    //update line numbers
     Prism.hooks.run('complete', {
         code: codes,
         grammar: grammar,
         language: lang,
         element: $elem
     });
+
 };
 
 const onFlyoverEnd = (v) => {
@@ -205,7 +213,7 @@ const onFlyoverEnd = (v) => {
     }
     if (!v) {
         state.$currentCodes.textContent = '';
-        state.currentIndex = null;
+        highlightIndex = null;
     }
 };
 
@@ -218,10 +226,10 @@ const waitFlyoverEnd = () => {
 const showCodes = async (rowData) => {
     //console.log(rowData);
 
-    if (state.currentIndex === rowData.tg_index) {
+    if (highlightIndex === rowData.tg_index) {
         return;
     }
-    state.currentIndex = rowData.tg_index;
+    highlightIndex = rowData.tg_index;
 
     if (!state.flyoverVisible) {
         state.flyoverVisible = true;
@@ -255,6 +263,9 @@ const showCodes = async (rowData) => {
 
 
 const onUpload = async (e) => {
+
+    state.flyoverVisible = false;
+
     const files = e.target.files;
     if (!files.length) {
         return;
@@ -318,7 +329,9 @@ const initSourcesAndMaps = async () => {
 
     state.consumers = consumers;
     state.sourceFiles = sourceFiles;
-    state.currentIndex = null;
+
+    highlightCache = {};
+    highlightIndex = null;
 
 };
 

@@ -221,3 +221,9 @@ flyover
         }
     }
 }
+
+.vui-popover {
+    .vui-popover-content {
+        word-break: break-all;
+    }
+}

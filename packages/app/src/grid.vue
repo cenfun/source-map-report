@@ -194,6 +194,26 @@ const createGrid = () => {
 
 };
 
+const getCodeLinesInfo = (codes) => {
+    const NEW_LINE_EXP = /\n(?!$)/g;
+    const codeLines = codes.split(NEW_LINE_EXP);
+    let large = false;
+    const maxLineLength = 2 * 1024;
+    const cl = codeLines.length;
+    if (cl < 20) {
+        for (let i = 0; i < cl; i++) {
+            if (codeLines[i].length > maxLineLength) {
+                large = true;
+                break;
+            }
+        }
+    }
+    return {
+        codeLines,
+        large
+    };
+};
+
 const getGridRows = () => {
 
     const consumers = state.consumers;
@@ -216,6 +236,9 @@ const getGridRows = () => {
             row.size = rowCodes.length;
             rowsSize += row.size;
             row.codes = rowCodes;
+            const { codeLines, large } = getCodeLinesInfo(rowCodes);
+            row.codeLines = codeLines;
+            row.large = large;
         }
 
         let subsSize = 0;
@@ -235,11 +258,16 @@ const getGridRows = () => {
 
             const size = subCodes.length;
             subsSize += size;
+
+            const { codeLines, large } = getCodeLinesInfo(subCodes);
+
             return {
                 index: oi,
                 name: it,
                 size,
                 codes: subCodes,
+                codeLines,
+                large,
                 type: 'original'
             };
 

@@ -42,10 +42,10 @@
           width="200px"
         />
         <div class="vui-flex-empty" />
-        <VuiSwitch
+        <!-- <VuiSwitch
           v-model="state.group"
           label="Group by Path"
-        />
+        /> -->
       </VuiFlex>
     </div>
     <div class="vui-body vui-flex-auto">
@@ -135,7 +135,8 @@ const langMap = {
 
 
 const {
-    VuiFlex, VuiInput, VuiSwitch, VuiFlyover, VuiPopover
+    //VuiSwitch,
+    VuiFlex, VuiInput, VuiFlyover, VuiPopover
 } = VineUI;
 
 const state = shallowReactive({
@@ -146,6 +147,7 @@ const state = shallowReactive({
     group: false,
     keywords: '',
     flyoverVisible: false,
+    currentRow: null,
     currentFile: ''
 });
 
@@ -170,33 +172,24 @@ const getLang = (name = '') => {
 let highlightCache = {};
 let highlightIndex = null;
 
-const getHighlightHTML = (lang, grammar, codes) => {
-    const html = Prism.highlight(codes, grammar, lang);
-    //new line mark
-    // let i = 0;
-    // const NEW_LINE_EXP = /(\r\n|\r|\n)/g;
-    // const str = html.replace(NEW_LINE_EXP, function() {
-    //     i += 1;
-    //     return `<br line="${i}">`;
-    // });
-
-    return html;
-};
-
-const highlightCodes = (filename, codes) => {
-    const lang = getLang(filename);
+const highlightCodes = (codes, large) => {
+    const lang = getLang(state.currentFile);
     const grammar = Prism.languages[lang] || Prism.languages.javascript;
     //console.log(lang, grammar);
 
-    let html = highlightCache[highlightIndex];
-    if (!html) {
-        html = getHighlightHTML(lang, grammar, codes);
-        highlightCache[highlightIndex] = html;
-    }
-
     const $elem = state.$code;
 
-    $elem.innerHTML = html;
+    //large codes no need highlight
+    if (!large) {
+        let html = highlightCache[highlightIndex];
+        if (!html) {
+            html = Prism.highlight(codes, grammar, lang);
+            highlightCache[highlightIndex] = html;
+        }
+
+        $elem.innerHTML = html;
+    }
+
     $elem.parentNode.className = `language-${lang}`;
 
     //update line numbers
@@ -206,8 +199,6 @@ const highlightCodes = (filename, codes) => {
         language: lang,
         element: $elem
     });
-
-    state.lineCount = $elem.querySelector('.line-numbers-rows').children.length;
 
 };
 
@@ -228,62 +219,34 @@ const waitFlyoverEnd = () => {
     });
 };
 
-const showCodes = async (rowData) => {
-    //console.log(rowData);
+const showCodes = async (currentRow) => {
+    //console.log(currentRow);
 
-    if (highlightIndex === rowData.tg_index) {
+    if (highlightIndex === currentRow.tg_index) {
         return;
     }
-    highlightIndex = rowData.tg_index;
+    highlightIndex = currentRow.tg_index;
 
     if (!state.flyoverVisible) {
         state.flyoverVisible = true;
         await waitFlyoverEnd();
     }
 
-    state.currentType = rowData.type;
-    state.currentFile = rowData.name;
+    state.currentRow = currentRow;
+    state.currentFile = currentRow.name;
 
-    const codes = rowData.codes;
+    const codes = currentRow.codes;
     if (!codes) {
         state.$code.textContent = 'Not found codes';
-        state.lineCount = 1;
         return;
-    }
-
-    //https://github.com/mozilla/source-map
-
-    if (state.currentType === 'original') {
-        //original
-        state.originalIndex = rowData.tg_index;
-        state.originalCodes = codes;
-
-        state.consumerIndex = rowData.tg_parent.index;
-        state.generatedIndex = rowData.tg_parent.tg_index;
-        state.generatedCodes = rowData.tg_parent.codes;
-    } else {
-        //generated
-        state.consumerIndex = rowData.index;
-        state.generatedIndex = rowData.tg_index;
-        state.generatedCodes = codes;
     }
 
     state.$code.textContent = codes;
 
-    setTimeout(() => {
-        highlightCodes(rowData.name, codes);
+    clearTimeout(state.timeoutId);
+    state.timeoutId = setTimeout(() => {
+        highlightCodes(codes, currentRow.large);
     }, 100);
-};
-
-let codeLinesCache = {};
-const getCodeLines = (index, codes) => {
-    let codeLines = codeLinesCache[index];
-    if (!codeLines) {
-        const NEW_LINE_EXP = /\n(?!$)/g;
-        codeLines = codes.split(NEW_LINE_EXP);
-        codeLinesCache[index] = codeLines;
-    }
-    return codeLines;
 };
 
 const openPopover = function(target, line, content) {
@@ -296,9 +259,42 @@ const openPopover = function(target, line, content) {
     });
 };
 
+//https://github.com/mozilla/source-map
 const clickCodesHandler = (e) => {
+
+    const currentRow = state.currentRow;
+    //not for generated
+    if (currentRow.type !== 'original') {
+        return;
+    }
+    //not for large
+    if (currentRow.large) {
+        return;
+    }
+
+    //const originalIndex = currentRow.tg_index;
+    //const originalCodes = currentRow.codes;
+    const originalCodeLines = currentRow.codeLines;
+
+    const generatedRow = currentRow.tg_parent;
+    const consumerIndex = generatedRow.index;
+    //const generatedIndex = generatedRow.tg_index;
+    const generatedCodes = generatedRow.codes;
+    const generatedCodeLines = generatedRow.codeLines;
+
+    if (!generatedCodes) {
+        return;
+    }
+
+    //current consumer
+    const consumer = state.consumers[consumerIndex];
+    if (!consumer) {
+        return;
+    }
+
+    const lineCount = originalCodeLines.length;
     const { offsetY } = e;
-    const currentLine = Math.ceil(offsetY / state.$code.clientHeight * state.lineCount);
+    const currentLine = Math.ceil(offsetY / state.$code.clientHeight * lineCount);
     //console.log(currentLine);
 
     const $rows = state.$code.querySelector('.line-numbers-rows');
@@ -307,31 +303,14 @@ const clickCodesHandler = (e) => {
     const $row = $rows.children[currentLine - 1];
     $row.classList.add('line-focus');
 
-    if (state.currentType !== 'original') {
-        return;
-    }
-
-    if (!state.generatedCodes) {
-        return;
-    }
-
-    //current consumer
-    const consumer = state.consumers[state.consumerIndex];
-    if (!consumer) {
-        return;
-    }
 
     //The line number is 1-based.
     //The column number is 0-based.
-
-    const originalCodeLines = getCodeLines(state.originalIndex, state.originalCodes);
     const originalLineCodes = originalCodeLines[currentLine - 1];
     // console.log(originalLineCodes);
     if (originalLineCodes.length > 1000) {
         return;
     }
-
-    const generatedCodeLines = getCodeLines(state.generatedIndex, state.generatedCodes);
 
     const list = consumer.allGeneratedPositionsFor({
         source: state.currentFile,
@@ -414,8 +393,8 @@ const initSourcesAndMaps = async () => {
 
     state.consumers = consumers;
     state.sourceFiles = sourceFiles;
+    state.currentRow = null;
 
-    codeLinesCache = {};
     highlightCache = {};
     highlightIndex = null;
 

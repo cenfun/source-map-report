@@ -64,7 +64,7 @@
     </div>
     <VuiFlyover
       :visible="state.flyoverVisible"
-      width="68%"
+      width="50%"
       position="right"
       @end="onFlyoverEnd"
     >
@@ -91,7 +91,10 @@
         <div class="vui-flyover-content vui-flex-auto">
           <div class="vui-codes">
             <div class="vui-current-codes line-numbers">
-              <pre class="language-"><code ref="currentCodes" /></pre>
+              <pre class="language-"><code
+                  ref="currentCodes"
+                  @click="clickCodesHandler"
+              /></pre>
             </div>
           </div>
         </div>
@@ -132,7 +135,7 @@ const langMap = {
 
 
 const {
-    VuiFlex, VuiInput, VuiSwitch, VuiFlyover
+    VuiFlex, VuiInput, VuiSwitch, VuiFlyover, VuiPopover
 } = VineUI;
 
 const state = shallowReactive({
@@ -170,14 +173,14 @@ let highlightIndex = null;
 const getHighlightHTML = (lang, grammar, codes) => {
     const html = Prism.highlight(codes, grammar, lang);
     //new line mark
-    let i = 0;
-    const NEW_LINE_EXP = /(\r\n|\r|\n)/g;
-    const str = html.replace(NEW_LINE_EXP, function() {
-        i += 1;
-        return `<br line="${i}">`;
-    });
+    // let i = 0;
+    // const NEW_LINE_EXP = /(\r\n|\r|\n)/g;
+    // const str = html.replace(NEW_LINE_EXP, function() {
+    //     i += 1;
+    //     return `<br line="${i}">`;
+    // });
 
-    return str;
+    return html;
 };
 
 const highlightCodes = (filename, codes) => {
@@ -191,7 +194,7 @@ const highlightCodes = (filename, codes) => {
         highlightCache[highlightIndex] = html;
     }
 
-    const $elem = state.$currentCodes;
+    const $elem = state.$code;
 
     $elem.innerHTML = html;
     $elem.parentNode.className = `language-${lang}`;
@@ -204,6 +207,8 @@ const highlightCodes = (filename, codes) => {
         element: $elem
     });
 
+    state.lineCount = $elem.querySelector('.line-numbers-rows').children.length;
+
 };
 
 const onFlyoverEnd = (v) => {
@@ -212,7 +217,7 @@ const onFlyoverEnd = (v) => {
         state.flyoverResolve = null;
     }
     if (!v) {
-        state.$currentCodes.textContent = '';
+        state.$code.textContent = '';
         highlightIndex = null;
     }
 };
@@ -241,54 +246,134 @@ const showCodes = async (rowData) => {
 
     const codes = rowData.codes;
     if (!codes) {
-        state.$currentCodes.textContent = 'Not found codes';
+        state.$code.textContent = 'Not found codes';
+        state.lineCount = 1;
         return;
     }
 
     //https://github.com/mozilla/source-map
 
-    if (rowData.type === 'original') {
-        const generatedRow = rowData.tg_parent;
-        state.generatedIndex = generatedRow.index;
+    if (state.currentType === 'original') {
+        //original
+        state.originalIndex = rowData.tg_index;
+        state.originalCodes = codes;
+
+        state.consumerIndex = rowData.tg_parent.index;
+        state.generatedIndex = rowData.tg_parent.tg_index;
+        state.generatedCodes = rowData.tg_parent.codes;
     } else {
         //generated
+        state.consumerIndex = rowData.index;
+        state.generatedIndex = rowData.tg_index;
+        state.generatedCodes = codes;
     }
 
-    state.$currentCodes.textContent = codes;
+    state.$code.textContent = codes;
 
     setTimeout(() => {
         highlightCodes(rowData.name, codes);
     }, 100);
 };
 
+let codeLinesCache = {};
+const getCodeLines = (index, codes) => {
+    let codeLines = codeLinesCache[index];
+    if (!codeLines) {
+        const NEW_LINE_EXP = /\n(?!$)/g;
+        codeLines = codes.split(NEW_LINE_EXP);
+        codeLinesCache[index] = codeLines;
+    }
+    return codeLines;
+};
 
-const onUpload = async (e) => {
+const openPopover = function(target, line, content) {
+    VuiPopover.createComponent({
+        target: target,
+        positions: ['left'],
+        width: 350,
+        title: `Generated codes for line: ${line}`,
+        content: content
+    });
+};
 
-    state.flyoverVisible = false;
+const clickCodesHandler = (e) => {
+    const { offsetY } = e;
+    const currentLine = Math.ceil(offsetY / state.$code.clientHeight * state.lineCount);
+    //console.log(currentLine);
 
-    const files = e.target.files;
-    if (!files.length) {
+    const $rows = state.$code.querySelector('.line-numbers-rows');
+    Array.from($rows.querySelectorAll('.line-focus')).forEach(($row) => $row.classList.remove('line-focus'));
+
+    const $row = $rows.children[currentLine - 1];
+    $row.classList.add('line-focus');
+
+    if (state.currentType !== 'original') {
         return;
     }
 
-    const maps = {};
-
-    for (const file of files) {
-
-        let err;
-        const str = await file.text().catch((er) => {
-            err = er;
-        });
-        if (err) {
-            console.error(err);
-            continue;
-        }
-
-        maps[file.name] = str;
-
+    if (!state.generatedCodes) {
+        return;
     }
 
-    state.sourcesAndMaps = maps;
+    //current consumer
+    const consumer = state.consumers[state.consumerIndex];
+    if (!consumer) {
+        return;
+    }
+
+    //The line number is 1-based.
+    //The column number is 0-based.
+
+    const originalCodeLines = getCodeLines(state.originalIndex, state.originalCodes);
+    const originalLineCodes = originalCodeLines[currentLine - 1];
+    // console.log(originalLineCodes);
+    if (originalLineCodes.length > 1000) {
+        return;
+    }
+
+    const generatedCodeLines = getCodeLines(state.generatedIndex, state.generatedCodes);
+
+    const list = consumer.allGeneratedPositionsFor({
+        source: state.currentFile,
+        line: currentLine
+    });
+
+    list.sort((a, b) => {
+        if (a.line === b.line) {
+            if (a.column === b.column) {
+                return 0;
+            }
+            return a.column > b.column ? 1 : -1;
+        }
+        return a.line > b.line ? 1 : -1;
+    });
+
+    // const pos = list.map((item) => {
+    //     return `${item.line}:${item.column}-${item.lastColumn}`;
+    // });
+    // console.log(pos);
+
+    //The line number is 1-based.
+    //The column number is 0-based.
+    const lineCodes = list.map((item) => {
+        if (typeof item.lastColumn === 'number') {
+            const line = generatedCodeLines[item.line - 1];
+            if (line) {
+                return line.slice(item.column, item.lastColumn + 1);
+            }
+        }
+    });
+    //console.log(lineCodes);
+
+    const codes = lineCodes.filter((it) => it).join('');
+
+    //console.log(codes);
+
+    if (!codes) {
+        return;
+    }
+
+    openPopover($row, currentLine, codes);
 
 };
 
@@ -330,6 +415,7 @@ const initSourcesAndMaps = async () => {
     state.consumers = consumers;
     state.sourceFiles = sourceFiles;
 
+    codeLinesCache = {};
     highlightCache = {};
     highlightIndex = null;
 
@@ -346,12 +432,42 @@ const initReportData = () => {
     }
 };
 
+const onUpload = async (e) => {
+
+    state.flyoverVisible = false;
+
+    const files = e.target.files;
+    if (!files.length) {
+        return;
+    }
+
+    const maps = {};
+
+    for (const file of files) {
+
+        let err;
+        const str = await file.text().catch((er) => {
+            err = er;
+        });
+        if (err) {
+            console.error(err);
+            continue;
+        }
+
+        maps[file.name] = str;
+
+    }
+
+    state.sourcesAndMaps = maps;
+
+};
+
 watch(() => state.sourcesAndMaps, () => {
     initSourcesAndMaps();
 });
 
 onMounted(() => {
-    state.$currentCodes = currentCodes.value;
+    state.$code = currentCodes.value;
     initReportData();
     initSourcesAndMaps();
 });

@@ -212,4 +212,12 @@ flyover
     pre::after {
         display: none;
     }
+
+    .line-focus {
+        background-color: #588ffd;
+
+        &::before {
+            color: #fff;
+        }
+    }
 }
